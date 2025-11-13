@@ -1,0 +1,584 @@
+import React, { useEffect, useMemo, useRef, useState } from "react";
+
+// --- Utilities ---
+const SIZE = 4;
+const START_TILES = 2;
+const PROB_4 = 0.1; // 10% chance of 4
+const KEY_TO_DIR = {
+  ArrowUp: "up",
+  ArrowDown: "down",
+  ArrowLeft: "left",
+  ArrowRight: "right",
+  w: "up",
+  s: "down",
+  a: "left",
+  d: "right",
+  W: "up",
+  S: "down",
+  A: "left",
+  D: "right",
+} as const;
+
+type Dir = 'up'|'down'|'left'|'right';
+
+type Grid = number[][];
+
+function clone(g: Grid): Grid { return g.map(r=>r.slice()); }
+function emptyCells(grid: Grid){ const cells: [number,number][]=[]; for(let r=0;r<SIZE;r++){ for(let c=0;c<SIZE;c++){ if(grid[r][c]===0) cells.push([r,c]); } } return cells; }
+function addRandomTile(grid: Grid){ const empties = emptyCells(grid); if(empties.length===0) return grid; const [r,c] = empties[Math.floor(Math.random()*empties.length)]; grid[r][c] = Math.random()<PROB_4?4:2; return grid; }
+function addRandomTileWithPos(grid: Grid){ const empties = emptyCells(grid); if(empties.length===0) return {grid, pos:null as null|[number,number]}; const [r,c] = empties[Math.floor(Math.random()*empties.length)]; grid[r][c] = Math.random()<PROB_4?4:2; return {grid, pos:[r,c] as [number,number]}; }
+function makeEmpty(): Grid { return Array.from({length: SIZE}, ()=>Array(SIZE).fill(0)); }
+function initGrid(): Grid { let g = makeEmpty(); for(let i=0;i<START_TILES;i++) g = addRandomTile(g); return g; }
+
+function rotateGrid(grid: Grid){ // rotate clockwise
+  const n = SIZE; const out = makeEmpty();
+  for(let r=0;r<n;r++) for(let c=0;c<n;c++) out[c][n-1-r] = grid[r][c];
+  return out;
+}
+function rotN(grid: Grid,n:number){ let g = grid; for(let i=0;i<n;i++) g = rotateGrid(g); return g; }
+
+function slideLeft(row: number[]){
+  const arr = row.filter(v=>v!==0);
+  let scoreGained = 0; const merged: number[]=[];
+  for(let i=0;i<arr.length;i++){
+    if(arr[i]!==0 && arr[i]===arr[i+1]){ merged.push(arr[i]*2); scoreGained += arr[i]*2; i++; }
+    else merged.push(arr[i]);
+  }
+  while(merged.length<SIZE) merged.push(0);
+  return { row: merged, scoreGained };
+}
+
+function move(grid: Grid, dir: Dir){
+  // normalize: perform left move by rotating
+  const rot = dir==="left"?0: dir==="up"?1: dir==="right"?2:3; // down=3
+  let g = rotN(grid, rot);
+  let changed=false; let score=0; const after = g.map(row=>{ const res = slideLeft(row); score += res.scoreGained; if(!changed && res.row.some((v,i)=>v!==row[i])) changed=true; return res.row; });
+  g = rotN(after, (4-rot)%4);
+  return { grid: g, changed, scoreGained: score };
+}
+
+function hasMoves(grid: Grid){
+  if(emptyCells(grid).length>0) return true;
+  for(let r=0;r<SIZE;r++) for(let c=0;c<SIZE;c++){
+    const v = grid[r][c];
+    if(r+1<SIZE && grid[r+1][c]===v) return true;
+    if(c+1<SIZE && grid[r][c+1]===v) return true;
+  }
+  return false;
+}
+
+function maxTile(grid: Grid){ return Math.max(...grid.flat()); }
+
+// --- Components ---
+export default function App(){
+  const [route,setRoute] = useState<string>(typeof window!=='undefined' ? (window.location.hash.replace('#','')||'home') : 'home');
+
+  useEffect(()=>{
+    const onHash = ()=> setRoute(window.location.hash.replace('#','')||'home');
+    window.addEventListener('hashchange', onHash);
+    return ()=> window.removeEventListener('hashchange', onHash);
+  },[]);
+
+  return (
+    <div className="min-h-screen bg-zinc-900 text-zinc-100">
+      <style>{`@keyframes pop{0%{transform:scale(.92)}100%{transform:scale(1)}}@keyframes spawn{0%{transform:scale(.5);opacity:.3}100%{transform:scale(1);opacity:1}}@keyframes slideIn{0%{opacity:0}100%{opacity:1}}`}</style>
+      <header className="max-w-5xl mx-auto px-4 py-6 flex items-center justify-between">
+        <a href="#home" className="text-2xl font-bold tracking-wide">Mini Arcade</a>
+        <nav className="space-x-4 text-sm">
+          <a href="#home" className="opacity-80 hover:opacity-100">Home</a>
+          <a href="#2048" className="opacity-80 hover:opacity-100">2048</a>
+          <a href="#snake" className="opacity-80 hover:opacity-100">Snake</a>
+          <a href="#tetris" className="opacity-80 hover:opacity-100">Tetris</a>
+          <a href="#mines" className="opacity-80 hover:opacity-100">Mines</a>
+        </nav>
+      </header>
+      {route==='home'? <Home/> : route==='2048'? <Game2048/> : route==='snake'? <SnakeGame/> : route==='tetris'? <TetrisGame/> : route==='mines'? <MinesGame/> : <NotFound/>}
+      <footer className="max-w-5xl mx-auto px-4 py-12 text-center opacity-70 text-xs">© {new Date().getFullYear()} Mini Arcade • Built with React + Tailwind</footer>
+    </div>
+  );
+}
+
+function Home(){
+  const games = [
+    { id:'2048', title:'2048', desc:'Swipe/arrow-key puzzle – merge tiles to reach 2048!', badge:'New', href:'#2048' },
+    { id:'snake', title:'Snake', desc:'Eat the apples, don’t hit the walls or yourself.', badge:'New', href:'#snake' },
+    { id:'tetris', title:'Tetris', desc:'Stack falling tetrominoes and clear lines.', badge:'New', href:'#tetris' },
+    { id:'mines', title:'Minesweeper', desc:'Open all safe cells. Right‑click to flag.', badge:'New', href:'#mines' },
+  ];
+  return (
+    <main className="max-w-5xl mx-auto px-4 pb-16">
+      <section className="text-center py-8">
+        <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight">Play small. Have big fun.</h1>
+        <p className="mt-3 text-zinc-300">A tiny collection of offline-friendly mini games. Start with 2048.</p>
+      </section>
+      <ul className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+        {games.map(g=> (
+          <li key={g.id} className="bg-zinc-800/70 rounded-2xl p-5 border border-zinc-700 hover:border-zinc-500 transition">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-xl font-semibold">{g.title}</h3>
+              <span className="text-[10px] px-2 py-1 rounded-full bg-zinc-700/70">{g.badge}</span>
+            </div>
+            <p className="text-sm opacity-80 mb-4">{g.desc}</p>
+            <a href={g.href} className="inline-block rounded-xl px-4 py-2 bg-zinc-100 text-zinc-900 font-medium hover:opacity-90">Play</a>
+          </li>
+        ))}
+      </ul>
+    </main>
+  );
+}
+
+function Game2048(){
+  const [grid,setGrid] = useState<Grid>(initGrid);
+  const [score,setScore] = useState(0);
+  const [best,setBest] = useState<number>(Number(localStorage.getItem('best2048')||0));
+  const [won,setWon] = useState(false);
+  const [lost,setLost] = useState(false);
+  const [isAnimating,setIsAnimating] = useState(false);
+  const [changedCells,setChangedCells] = useState<Set<string>>(new Set());
+  const [spawnPos,setSpawnPos] = useState<null|[number,number]>(null);
+  const lastMoveRef = useRef({grid: clone(initGrid()), score: 0}); // simple undo (one step)
+
+  const reset = ()=>{ setGrid(initGrid()); setScore(0); setWon(false); setLost(false); setIsAnimating(false); setChangedCells(new Set()); setSpawnPos(null); };
+  const undo = ()=>{ setGrid(clone(lastMoveRef.current.grid)); setScore(lastMoveRef.current.score); setLost(false); setWon(maxTile(lastMoveRef.current.grid)>=2048); };
+
+  // keep a ref to latest act to avoid stale handlers
+  const actRef = useRef<(d:Dir)=>void>(()=>{});
+
+  // keyboard control
+  useEffect(()=>{
+    const onKey = (e: KeyboardEvent)=>{
+      const dir = KEY_TO_DIR[(e.key as keyof typeof KEY_TO_DIR)] as unknown as Dir | undefined;
+      if(!dir) return;
+      e.preventDefault();
+      actRef.current && actRef.current(dir);
+    };
+    window.addEventListener('keydown', onKey);
+    return ()=> window.removeEventListener('keydown', onKey);
+  },[]);
+
+  // touch control
+  const start = useRef<[number,number]|null>(null);
+  const onTouchStart = (e: React.TouchEvent)=>{ const t=e.touches[0]; start.current=[t.clientX,t.clientY]; };
+  const onTouchEnd = (e: React.TouchEvent)=>{
+    if(!start.current) return; const t=e.changedTouches[0];
+    const dx=t.clientX-start.current[0]; const dy=t.clientY-start.current[1];
+    const ax=Math.abs(dx), ay=Math.abs(dy);
+    if(Math.max(ax,ay)<24) return; // swipe threshold
+    const dir = (ax>ay ? (dx>0?"right":"left") : (dy>0?"down":"up")) as Dir;
+    act(dir);
+    start.current=null;
+  };
+
+  const act = (dir: Dir)=>{
+    if(lost || isAnimating) return;
+    const prev = clone(grid);
+    const {grid: g, changed, scoreGained} = move(grid, dir);
+    if(!changed) { return; }
+    let after = clone(g);
+    const add = addRandomTileWithPos(after);
+    const next = add.grid;
+    const newScore = score + scoreGained;
+    lastMoveRef.current = { grid: prev, score };
+    // changed cell set
+    const cs = new Set<string>();
+    for(let r=0;r<SIZE;r++) for(let c=0;c<SIZE;c++) if(next[r][c]!==prev[r][c] && next[r][c]>0) cs.add(`${r},${c}`);
+    setChangedCells(cs);
+    setSpawnPos(add.pos);
+    setIsAnimating(true);
+    setGrid(next); setScore(newScore);
+    if(newScore>best){ setBest(newScore); localStorage.setItem('best2048', String(newScore)); }
+    if(!won && maxTile(next)>=2048) setWon(true);
+    if(!hasMoves(next)) setLost(true);
+    setTimeout(()=> setIsAnimating(false), 140);
+  };
+
+  // update ref to latest act
+  useEffect(()=>{ actRef.current = act; });
+
+  const tiles = useMemo(()=> grid.flat().map((v,i)=>({v, r: Math.floor(i/SIZE), c: i%SIZE})), [grid]);
+
+  return (
+    <main className="max-w-5xl mx-auto px-4 pb-16 select-none">
+      <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 py-6">
+        <div>
+          <h1 className="text-4xl font-extrabold tracking-tight">2048</h1>
+          <p className="text-zinc-300">Use your arrow keys or swipe to merge tiles and reach 2048.</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <Score label="Score" value={score}/>
+          <Score label="Best" value={best}/>
+          <button onClick={reset} className="rounded-xl bg-amber-400 text-zinc-900 font-semibold px-4 py-2 hover:opacity-90">New Game</button>
+          <button onClick={undo} className="rounded-xl bg-zinc-700 px-4 py-2 hover:bg-zinc-600">Undo</button>
+        </div>
+      </div>
+
+      <div className="relative w-full max-w-md mx-auto" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+        <Board grid={grid} changedCells={changedCells} spawnPos={spawnPos}/>
+        {(won||lost) && (
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm rounded-3xl flex flex-col items-center justify-center gap-4 animate-[slideIn_.2s_ease]">
+            <div className="text-4xl font-extrabold">{won?"You win!":"Game Over"}</div>
+            <div className="opacity-90 text-sm">{won?"Try for a higher tile.":"No more moves available."}</div>
+            <div className="flex gap-2 mt-2">
+              {!lost && <button onClick={()=>{setWon(false); setLost(false);}} className="rounded-xl bg-zinc-700 px-4 py-2 hover:bg-zinc-600">Continue</button>}
+              <a href="#home" className="rounded-xl bg-zinc-700 px-4 py-2 hover:bg-zinc-600">Home</a>
+              <button onClick={reset} className="rounded-xl bg-amber-400 text-zinc-900 font-semibold px-4 py-2 hover:opacity-90">New Game</button>
+            </div>
+            <div className="flex gap-3 text-sm opacity-80">
+              <div>Score: <span className="font-bold">{score}</span></div>
+              <div>Best: <span className="font-bold">{best}</span></div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="max-w-md mx-auto mt-6 text-sm text-zinc-400">
+        <p>Tip: Press <kbd className="px-1.5 py-0.5 rounded bg-zinc-800 border border-zinc-700">R</kbd> to quickly restart. (coming soon)</p>
+      </div>
+    </main>
+  );
+}
+
+function Score({label, value}:{label:string; value:number}){
+  return (
+    <div className="rounded-2xl bg-zinc-800 px-4 py-2 text-center border border-zinc-700 min-w-[88px]">
+      <div className="text-[10px] uppercase tracking-wider opacity-70">{label}</div>
+      <div className="text-xl font-bold">{value}</div>
+    </div>
+  );
+}
+
+function Board({grid, changedCells, spawnPos}:{grid:number[][], changedCells?:Set<string>, spawnPos?:null|[number,number]}){
+  return (
+    <div className="relative bg-zinc-800 p-3 rounded-3xl shadow-inner border border-zinc-700">
+      <div className="grid grid-cols-4 gap-3">
+        {grid.map((row, r)=> row.map((v,c)=> (
+          <Cell key={`${r}-${c}-${v}`} value={v} changed={changedCells?.has(`${r},${c}`)} spawned={!!(spawnPos && spawnPos[0]===r && spawnPos[1]===c)}/>
+        )))}
+      </div>
+    </div>
+  );
+}
+
+function Cell({value, changed, spawned}:{value:number, changed?:boolean, spawned?:boolean}){
+  const display = value===0?"":String(value);
+  const color = tileColor(value);
+  const animClass = value===0?"": (spawned?" animate-[spawn_.14s_ease]": (changed?" animate-[pop_.12s_ease]":""));
+  return (
+    <div className={`aspect-square rounded-2xl flex items-center justify-center font-extrabold text-2xl md:text-3xl transition-all duration-200 ease-out ${color.bg} ${color.text} border ${color.border} ${animClass}`}>
+      {display}
+    </div>
+  );
+}
+
+function tileColor(v:number){
+  const map:{[k:number]:{bg:string;text:string;border:string}}={
+    0:{bg:"bg-zinc-900", text:"text-zinc-400", border:"border-zinc-800"},
+    2:{bg:"bg-amber-50", text:"text-amber-900", border:"border-amber-200"},
+    4:{bg:"bg-amber-100", text:"text-amber-900", border:"border-amber-200"},
+    8:{bg:"bg-amber-300", text:"text-amber-900", border:"border-amber-400"},
+    16:{bg:"bg-orange-400", text:"text-zinc-900", border:"border-orange-500"},
+    32:{bg:"bg-orange-500", text:"text-zinc-900", border:"border-orange-600"},
+    64:{bg:"bg-orange-600", text:"text-zinc-100", border:"border-orange-700"},
+    128:{bg:"bg-amber-400", text:"text-zinc-900", border:"border-amber-500"},
+    256:{bg:"bg-yellow-400", text:"text-zinc-900", border:"border-yellow-500"},
+    512:{bg:"bg-yellow-500", text:"text-zinc-900", border:"border-yellow-600"},
+    1024:{bg:"bg-yellow-600", text:"text-zinc-100", border:"border-yellow-700"},
+    2048:{bg:"bg-yellow-700", text:"text-zinc-100", border:"border-yellow-800"},
+  };
+  // default for >2048
+  return map[v] || {bg:"bg-yellow-800", text:"text-zinc-100", border:"border-yellow-900"};
+}
+
+// --- Snake ---
+function SnakeGame(){
+  const N = 20;
+  const speedMs = 120;
+  const [snake,setSnake] = useState<[number,number][]>([[10,10],[10,9],[10,8]]);
+  const [dir,setDir] = useState<[number,number]>([0,1]);
+  const dirRef = useRef(dir); useEffect(()=>{dirRef.current=dir;},[dir]);
+  const [apple,setApple] = useState<[number,number]>([5,5]);
+  const [alive,setAlive] = useState(true);
+  const [score,setScore] = useState(0);
+
+  useEffect(()=>{
+    function onKey(e: KeyboardEvent){
+      const k = e.key;
+      const map: Record<string,[number,number]> = {ArrowUp:[-1,0], w:[-1,0], ArrowDown:[1,0], s:[1,0], ArrowLeft:[0,-1], a:[0,-1], ArrowRight:[0,1], d:[0,1]};
+      const nd = map[k]; if(!nd) return;
+      // prevent reversing
+      const [r,c] = dirRef.current; if(r+nd[0]===0 && c+nd[1]===0) return;
+      setDir(nd);
+    }
+    window.addEventListener('keydown', onKey);
+    return ()=> window.removeEventListener('keydown', onKey);
+  },[]);
+
+  useEffect(()=>{
+    if(!alive) return;
+    const id = setInterval(()=>{
+      setSnake(prev=>{
+        const head = prev[0];
+        const next: [number,number] = [head[0]+dirRef.current[0], head[1]+dirRef.current[1]];
+        // wall or self collision
+        if(next[0]<0||next[0]>=N||next[1]<0||next[1]>=N|| prev.some(([r,c])=>r===next[0]&&c===next[1])){
+          setAlive(false);
+          return prev;
+        }
+        const ate = next[0]===apple[0] && next[1]===apple[1];
+        const ns = [next, ...prev];
+        if(!ate) ns.pop(); else { // place new apple not on snake
+          setScore(s=>s+1);
+          let a:[number,number];
+          do { a=[Math.floor(Math.random()*N), Math.floor(Math.random()*N)]; } while(ns.some(([r,c])=>r===a[0]&&c===a[1]));
+          setApple(a);
+        }
+        return ns;
+      });
+    }, speedMs);
+    return ()=> clearInterval(id);
+  },[alive, apple]);
+
+  const reset = ()=>{ setSnake([[10,10],[10,9],[10,8]]); setDir([0,1]); setApple([5,5]); setAlive(true); setScore(0); };
+
+  return (
+    <main className="max-w-5xl mx-auto px-4 pb-16 select-none">
+      <div className="flex items-end justify-between py-6">
+        <h1 className="text-4xl font-extrabold tracking-tight">Snake</h1>
+        <div className="flex items-center gap-3">
+          <Score label="Score" value={score}/>
+          <button onClick={reset} className="rounded-xl bg-amber-400 text-zinc-900 font-semibold px-4 py-2 hover:opacity-90">New Game</button>
+        </div>
+      </div>
+      <div className="relative w-full max-w-md mx-auto">
+        <div className="grid grid-cols-20 gap-1 p-2 rounded-3xl bg-zinc-800 border border-zinc-700">
+          {Array.from({length:N*N}).map((_,i)=>{
+            const r=Math.floor(i/N), c=i%N;
+            const isHead = snake[0][0]===r && snake[0][1]===c;
+            const onSnake = isHead || snake.slice(1).some(([sr,sc])=>sr===r&&sc===c);
+            const isApple = apple[0]===r && apple[1]===c;
+            return <div key={i} className={`aspect-square rounded-md ${isHead? 'bg-emerald-400': onSnake? 'bg-emerald-600':'bg-zinc-900'} ${isApple? 'outline outline-2 outline-red-400':''}`}/>;
+          })}
+        </div>
+        {!alive && (
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm rounded-3xl flex flex-col items-center justify-center gap-3">
+            <div className="text-3xl font-bold">Game Over</div>
+            <div className="opacity-80">Final score: {score}</div>
+            <div className="flex gap-2">
+              <a href="#home" className="rounded-xl bg-zinc-700 px-4 py-2 hover:bg-zinc-600">Home</a>
+              <button onClick={reset} className="rounded-xl bg-amber-400 text-zinc-900 font-semibold px-4 py-2 hover:opacity-90">New Game</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </main>
+  );
+}
+
+// --- Tetris ---
+function TetrisGame(){
+  const W=10, H=20;
+  type Cell = 0|1|2|3|4|5|6|7; // 7 tetromino ids
+  const shapes: {[k:number]: number[][]} = {
+    1:[[1,1,1,1]], // I
+    2:[[2,2],[2,2]], // O
+    3:[[0,3,0],[3,3,3]], // T
+    4:[[0,4,4],[4,4,0]], // S
+    5:[[5,5,0],[0,5,5]], // Z
+    6:[[6,0,0],[6,6,6]], // J
+    7:[[0,0,7],[7,7,7]], // L
+  };
+  function rotate(m:number[][]){ const R=m.length,C=m[0].length; const out=Array.from({length:C},()=>Array(R).fill(0)); for(let r=0;r<R;r++) for(let c=0;c<C;c++) out[c][R-1-r]=m[r][c]; return out; }
+  const [board,setBoard] = useState<Cell[][]>(Array.from({length:H},()=>Array(W).fill(0 as Cell)));
+  const [piece,setPiece] = useState({id: Math.floor(Math.random()*7)+1, mat: [] as number[][], r:0, c:3});
+  const [alive,setAlive] = useState(true);
+  const [score,setScore] = useState(0);
+
+  // spawn piece
+  useEffect(()=>{ setPiece(p=>({id:p.id, mat: shapes[p.id], r:0, c:3})); },[]);
+  function collides(mat:number[][], r:number, c:number){
+    for(let i=0;i<mat.length;i++) for(let j=0;j<mat[0].length;j++){
+      if(mat[i][j]===0) continue;
+      const R=r+i,C=c+j; if(R<0||R>=H||C<0||C>=W) return true; if(board[R][C]!==0) return true;
+    }
+    return false;
+  }
+  function merge(mat:number[][], r:number, c:number){
+    const b = board.map(row=>row.slice()); const id=piece.id as Cell;
+    for(let i=0;i<mat.length;i++) for(let j=0;j<mat[0].length;j++) if(mat[i][j]) b[r+i][c+j]=id;
+    return b;
+  }
+  function newPiece(){ const id = (Math.floor(Math.random()*7)+1); const mat = shapes[id]; return {id, mat, r:0, c:3}; }
+
+  // controls
+  useEffect(()=>{
+    function onKey(e: KeyboardEvent){
+      if(!alive) return;
+      if(['ArrowLeft','a','A'].includes(e.key)){
+        e.preventDefault(); const nc=piece.c-1; if(!collides(piece.mat,piece.r,nc)) setPiece(p=>({...p,c:nc}));
+      } else if(['ArrowRight','d','D'].includes(e.key)){
+        e.preventDefault(); const nc=piece.c+1; if(!collides(piece.mat,piece.r,nc)) setPiece(p=>({...p,c:nc}));
+      } else if(['ArrowUp','w','W'].includes(e.key)){
+        e.preventDefault(); const rot = rotate(piece.mat); if(!collides(rot,piece.r,piece.c)) setPiece(p=>({...p,mat:rot}));
+      } else if(['ArrowDown','s','S'].includes(e.key)){
+        e.preventDefault(); tick();
+      } else if(e.key===' '){ e.preventDefault(); while(!collides(piece.mat,piece.r+1,piece.c)) setPiece(p=>({...p,r:p.r+1})); tick(); }
+    }
+    window.addEventListener('keydown', onKey);
+    return ()=> window.removeEventListener('keydown', onKey);
+  },[piece, alive, board]);
+
+  // gravity
+  useEffect(()=>{ if(!alive) return; const id=setInterval(()=> tick(), 600); return ()=> clearInterval(id); });
+
+  function clearLines(b: Cell[][]){
+    let cleared=0; const out = b.filter(row=>{ const full=row.every(v=>v!==0); if(full) cleared++; return !full; });
+    while(out.length<H) out.unshift(Array(W).fill(0 as Cell));
+    if(cleared>0) setScore(s=>s+cleared*100);
+    return out;
+  }
+
+  function tick(){
+    // try move down
+    if(collides(piece.mat, piece.r+1, piece.c)){
+      // lock piece
+      const merged = merge(piece.mat, piece.r, piece.c);
+      const cleared = clearLines(merged);
+      setBoard(cleared);
+      const np = newPiece();
+      if(collides(np.mat, np.r, np.c)) { setAlive(false); return; }
+      setPiece(np);
+    } else {
+      setPiece(p=>({...p, r:p.r+1}));
+    }
+  }
+
+  const reset = ()=>{ setBoard(Array.from({length:H},()=>Array(W).fill(0 as Cell))); const np=newPiece(); setPiece(np); setAlive(true); setScore(0); };
+
+  return (
+    <main className="max-w-5xl mx-auto px-4 pb-16 select-none">
+      <div className="flex items-end justify-between py-6">
+        <h1 className="text-4xl font-extrabold tracking-tight">Tetris</h1>
+        <div className="flex items-center gap-3">
+          <Score label="Score" value={score}/>
+          <button onClick={reset} className="rounded-xl bg-amber-400 text-zinc-900 font-semibold px-4 py-2 hover:opacity-90">New Game</button>
+        </div>
+      </div>
+      <div className="relative w-full max-w-md mx-auto">
+        <div className="grid grid-cols-10 gap-1 p-2 rounded-3xl bg-zinc-800 border border-zinc-700">
+          {board.map((row,r)=> row.map((v,c)=> (
+            <div key={`${r}-${c}`} className={`aspect-square rounded-[4px] ${v? 'bg-cyan-400':'bg-zinc-900'}`}></div>
+          )))}
+        </div>
+        {!alive && (
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm rounded-3xl flex flex-col items-center justify-center gap-3">
+            <div className="text-3xl font-bold">Game Over</div>
+            <div className="opacity-80">Final score: {score}</div>
+            <div className="flex gap-2">
+              <a href="#home" className="rounded-xl bg-zinc-700 px-4 py-2 hover:bg-zinc-600">Home</a>
+              <button onClick={reset} className="rounded-xl bg-amber-400 text-zinc-900 font-semibold px-4 py-2 hover:opacity-90">New Game</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </main>
+  );
+}
+
+// --- Minesweeper ---
+function MinesGame(){
+  const W=10, H=10, MINES=10;
+  type Cell = { open:boolean; mine:boolean; flag:boolean; count:number };
+  const [grid,setGrid] = useState<Cell[][]>(()=> Array.from({length:H},()=>Array.from({length:W},()=>({open:false,mine:false,flag:false,count:0}))));
+  const [alive,setAlive] = useState(true);
+  const [started,setStarted] = useState(false);
+  const [cleared,setCleared] = useState(0);
+  const totalSafe = W*H-MINES;
+
+  function neighbors(r:number,c:number){ const n: [number,number][]=[]; for(let dr=-1;dr<=1;dr++) for(let dc=-1;dc<=1;dc++){ if(!dr&&!dc) continue; const R=r+dr,C=c+dc; if(R>=0&&R<H&&C>=0&&C<W) n.push([R,C]); } return n; }
+
+  function plantMines(safeR:number, safeC:number){
+    const cells: [number,number][]=[]; for(let r=0;r<H;r++) for(let c=0;c<W;c++) if(!(r===safeR&&c===safeC)) cells.push([r,c]);
+    for(let i=0;i<MINES;i++){
+      const idx = Math.floor(Math.random()*cells.length); const [r,c]=cells.splice(idx,1)[0]; grid[r][c].mine=true;
+    }
+    for(let r=0;r<H;r++) for(let c=0;c<W;c++) grid[r][c].count = neighbors(r,c).filter(([R,C])=>grid[R][C].mine).length;
+  }
+
+  function openCell(r:number,c:number){
+    if(!alive) return; if(grid[r][c].open || grid[r][c].flag) return;
+    if(!started){ plantMines(r,c); setStarted(true); }
+    const g = grid.map(row=>row.map(cell=>({...cell})));
+    function flood(R:number,C:number){
+      const cell=g[R][C]; if(cell.open||cell.flag) return; cell.open=true; if(!cell.mine) setCleared(x=>x+1);
+      if(cell.mine){ setAlive(false); return; }
+      if(cell.count===0) neighbors(R,C).forEach(([r2,c2])=> flood(r2,c2));
+    }
+    flood(r,c);
+    setGrid(g);
+  }
+
+  function toggleFlag(e: React.MouseEvent, r:number,c:number){ e.preventDefault(); if(!alive) return; if(grid[r][c].open) return; const g=grid.map(row=>row.map(cell=>({...cell}))); g[r][c].flag=!g[r][c].flag; setGrid(g); }
+  const reset = ()=>{ setGrid(Array.from({length:H},()=>Array.from({length:W},()=>({open:false,mine:false,flag:false,count:0})))); setAlive(true); setStarted(false); setCleared(0); };
+
+  const win = alive && cleared===totalSafe;
+
+  return (
+    <main className="max-w-5xl mx-auto px-4 pb-16 select-none">
+      <div className="flex items-end justify-between py-6">
+        <h1 className="text-4xl font-extrabold tracking-tight">Minesweeper</h1>
+        <div className="flex items-center gap-3">
+          <Score label="Cleared" value={cleared}/>
+          <button onClick={reset} className="rounded-xl bg-amber-400 text-zinc-900 font-semibold px-4 py-2 hover:opacity-90">New Game</button>
+        </div>
+      </div>
+      <div className="relative w-full max-w-md mx-auto">
+        <div className="grid grid-cols-10 gap-1 p-2 rounded-3xl bg-zinc-800 border border-zinc-700 select-none">
+          {grid.map((row,r)=> row.map((cell,c)=>{
+            const base = 'aspect-square rounded-md flex items-center justify-center text-sm font-bold cursor-pointer';
+            const classes = cell.open? (cell.mine? 'bg-red-500 text-white' : 'bg-zinc-900 text-zinc-100') : (cell.flag? 'bg-zinc-700 text-yellow-300' : 'bg-zinc-900/80 text-zinc-300 hover:bg-zinc-700/60');
+            return (
+              <div key={`${r}-${c}`}
+                   onClick={()=> openCell(r,c)}
+                   onContextMenu={(e)=> toggleFlag(e,r,c)}
+                   className={`${base} ${classes}`}>
+                {cell.open? (cell.mine? '💣' : (cell.count||'')) : (cell.flag? '⚑' : '')}
+              </div>
+            );
+          }))}
+        </div>
+        {(!alive || win) && (
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm rounded-3xl flex flex-col items-center justify-center gap-3">
+            <div className="text-3xl font-bold">{win? 'You win!' : 'Game Over'}</div>
+            <div className="opacity-80">{win? 'All safe cells uncovered.' : 'You clicked a mine.'}</div>
+            <div className="flex gap-2">
+              <a href="#home" className="rounded-xl bg-zinc-700 px-4 py-2 hover:bg-zinc-600">Home</a>
+              <button onClick={reset} className="rounded-xl bg-amber-400 text-zinc-900 font-semibold px-4 py-2 hover:opacity-90">New Game</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </main>
+  );
+}
+
+function NotFound(){
+  return (
+    <main className="max-w-5xl mx-auto px-4 py-20">
+      <h1 className="text-3xl font-bold mb-2">Page not found</h1>
+      <p className="opacity-80">Try heading back <a className="underline" href="#home">home</a>.</p>
+    </main>
+  );
+}
+
+// --- Lightweight inline tests (run once in-browser) ---
+if (typeof window !== 'undefined' && !(window as any).__mini_arcade_tested__) {
+  (window as any).__mini_arcade_tested__ = true;
+  // slideLeft should merge adjacent equals once
+  const t1 = slideLeft([2,2,0,0]);
+  console.assert(JSON.stringify(t1.row) === JSON.stringify([4,0,0,0]), 'slideLeft basic merge failed');
+  const t2 = slideLeft([2,2,2,0]);
+  console.assert(JSON.stringify(t2.row) === JSON.stringify([4,2,0,0]), 'slideLeft chain merge ordering failed');
+  const g0 = [[2,0,0,0],[2,0,0,0],[0,0,0,0],[0,0,0,0]] as Grid;
+  const m = move(g0,'left');
+  console.assert(m.changed===true, 'move should report changed');
+}
